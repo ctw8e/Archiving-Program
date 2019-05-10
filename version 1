@@ -1,8 +1,12 @@
  # -*- coding: utf-8 -*-
 """
-Created on Fri Apr 26 15:44:00 2019
+Author: Channing West
 
-@author: chann
+Changelog: 5/10/2019
+
+This program archives rotational spectra from the Tektronix DPO73304D oscilloscope
+at set intervals.
+
 """
 
 import visa
@@ -13,9 +17,15 @@ import scipy
 import scipy.fftpack
 
 class ScopeDriver:
-    _host = 'TCPIP::169.254.27.62::INSTR'
+    
+    # Set up default class variables that are passed into an instance upon 
+    # instantiation when instance variables are not explicitly defined.
+    # The instrument is connected to the PC controller via ethernet running 
+    # through and ethernet switch. The IP adress of the oscilloscope is _host.
+    # math2 channel on the oscilloscope containing the averaged FID.
+    _host = 'TCPIP::169.254.27.62::INSTR' 
     _source = 'Math2'
-    _timeout = 5000
+    _timeout = 5000  
 
     def __init__(self, host = None, source = None, timeout = None): 
         if host == None:
@@ -24,24 +34,33 @@ class ScopeDriver:
             self.source = ScopeDriver._source
         if timeout == None:
             self.timeout = ScopeDriver._timeout
-            
+    
+    # Use PyVisa to setup Resource Manager and establish connection between the
+    # PC controller and the scope        
     def _connect(self):
         rm = visa.ResourceManager()
         connect = rm.open_resource(self.host)
         return connect
     
+    # The query command is a hybrid write/read command. The controller will 
+    # establish connection with the scope, ask about some parameter, and wait 
+    # for a response from the scope. 
     def _query(self, command):
         scope_query = self._connect()
         scope_query.timeout = self.timeout
         query = scope_query.query(command)
         return query
     
+    # Write is used when you want to set a parameter on the scope and do not 
+    # need expect a response (no read).
     def _write(self, command):
         scope_write = self._connect()
         scope_write.timeout = self.timeout
         write_command = scope_write.write(command)
         return write_command     
     
+    # Queries the scope for its identity (Make, model, etc.) using the standard
+    # SCPI command. SCPI commands are used throughout the code.
     def _IDN(self):
         identity = self._query('*IDN?')
         return identity
@@ -57,57 +76,65 @@ class ScopeDriver:
         self._write('ACQuire:STATE STOP')
         return "Averaging stopped"
     
+    # Queries the number of FastFrame acquisitions.
     def get_averages(self):
         avgs = self._query('ACQuire:NUMFRAMESACQuired?')
         return avgs
     
-    def data_source(self):                                #does source need to be included in args?
-        self._write('DATa:SOUrce Math2' )      #%self.source
+    # Selects the scope channel that the data will come from.
+    def data_source(self):                                                      #does source need to be included in args?
+        self._write('DATa:SOUrce Math2' )                                       #%self.source
 
     def data_format(self):
         format1 = self._query('DATa:ENCdg ASCIi?')
         return format1
-
+    
+    # Allows you to select the data from a single frame or range of frames from
+    # a FastFrame acquisition. We collect 9 total frames per gas shot. Eight 
+    # unique frames and a summary frame.
     def frame_range(self, frame):
         self._write('DATa:FRAMESTARt %s' %frame)
         self._write('DATa:FRAMESTOP %s' %frame)
-#        return frame_start, frame_stop
     
+    # With the current instrument setup (2-8 GHz), we use a 40 microsecond 
+    # detection time at a sample rate of 25 Gs/sec, giving us 1000000 data 
+    # points in a FID. This method defines the portion of that data we want to 
+    # transfer.
     def data_range(self, start = None, stop = None):
-        data_start = self._write('DATa:STARt %i' %start)
-        data_stop = self._write('DATa:STOP %i' %stop)
-        return data_start, data_stop
-
+        self._write('DATa:STARt %i' %start)
+        self._write('DATa:STOP %i' %stop)
+    
+    # Retrieves the preamble of the data being transferred.
     def preamble(self):
         header = self._query('wfmoutpre?').split(',')
         return header        
 
+    # Retrieves the time domain waveform from the scope.
     def get_waveform(self):
         self.data_source()
 #        set_format = self.data_format()
         self.data_range(1, 1000000)
-        self.frame_range(9)               #Frame 9 is the summary frame of FastFrame acquisition
+        self.frame_range(9)
         self.preamble()
         time_list = []
-#        intensity_list = []
-#        current_intensity = []        
         intensity = self._query('CURVe?').strip().split(',')
-#        intensity = list(map(float,intensity))
         for i in range(0,len(intensity)):
             current_time = "{:.11f}".format(3E-6 + 4E-11*i)
             time_list.append(current_time)
         waveform = np.column_stack((time_list,intensity))
-#        for x in range(0,len(intensity)):
-#            waveform[:,1] = "{:.12f}".format(waveform[:,1])
-#            intensity_list.append(current_intensity)
         return waveform
     
+    # Clears data from scope.
     def clear_scope(self):
         self._write('CLEAR ALL')
         return "Instrument cleared"
     
     
 class Archive_Spectra(ScopeDriver):
+# This class inherits from the ScopeDriver class. This class saves waveforms
+# when a user defined number of FIDs have been recoreded. The time domain file
+# is saved as well as a Fourier transformed data set
+    
     _save_freq = 100000
     _save_num = 20
     _file_folder = 'C:\\Users\\Pate Lab\\OneDrive\\Oscilloscope Data-Controller'
@@ -122,38 +149,41 @@ class Archive_Spectra(ScopeDriver):
         if file_folder == None:
             self.file_folder = Archive_Spectra._file_folder
         if base_name == None:
-            self.base_name = Archive_Spectra._base_name
-    
+            self.base_name = Archive_Spectra._base_name       
+            
+    # Time domain and frequency domain data saved
     def save_FID_FT(self):
-#        waveform, preamble = self.get_waveform()
         thousand_avg = int(self.save_freq/1000)
         os.chdir(self.file_folder)
         file_name = '{base_name}_{averages}{avg}_{time}'.format(base_name = self.base_name, averages = thousand_avg, avg = 'Kavg', time = time.strftime('%H_%M_%S'))
         file_name_txt = '{file_name}_{extension}'.format(file_name = file_name, extension = '.txt')
         file_name_ft = '{file_name}_{extension}'.format(file_name = file_name, extension = '.ft')
-#        np.savetxt(full_file_name)
         np.savetxt(file_name_txt, self.get_waveform(), fmt = '%s')
         
-        srate = 25E9
-        f = open(file_name_txt,'r')
+        # This code has been taken from fft-zero-padding-with heading.py and 
+        # it performs a FT of the time domain data
+        sampling_rate = 25E9
+        raw_data = open(file_name_txt,'r')
+        
         timedomain = []
-        for row in f:
-            temp=row.split()
-            timedomain.append(float(temp[np.size(temp)-1]))
+        
+        for row in raw_data:
+            temp = row.split()
+            timedomain.append(float(temp[np.size(temp) - 1]))
 
         ndata = np.size(timedomain)
 
-        window = np.kaiser(ndata,9.5)	
+        kaiser_window = np.kaiser(ndata,9.5)	
         
         for i, row in enumerate(timedomain):
-            timedomain[i] = row * window[i]
+            timedomain[i] = row * kaiser_window[i]
         
         temp = np.zeros(ndata*2)
         temp[0:ndata] = timedomain
         timepad = temp
         
         fft = abs(scipy.fftpack.fft(timepad))/100
-        freq = (scipy.fftpack.fftfreq(np.size(timepad),1/srate))/1E6
+        freq = (scipy.fftpack.fftfreq(np.size(timepad),1/sampling_rate))/1E6
         freqs = []
         ft = []
         for i, row in enumerate(freq):
@@ -168,7 +198,7 @@ class Archive_Spectra(ScopeDriver):
             
         np.savetxt(file_name_ft, out)        
         
-        
+    # Saves a set number of spectra.        
     def archive_loop(self):        
         counter = 0
         self.start_run()
