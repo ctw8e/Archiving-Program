@@ -1,106 +1,196 @@
-import time
-import os
-import numpy as np
+ # -*- coding: utf-8 -*-
+"""
+Created on Fri Apr 26 15:44:00 2019
+
+@author: chann
+"""
+
 import visa
+import numpy as np
+import os
+import time
+import scipy
+import scipy.fftpack
 
-class ExperimentFoo:
-    save_every=input('Enter the number of averaged FIDs before saving: \n')
-    run_until=input('Enter the number of files to be saved: \n')
-    file_folder=input('Enter the path to the folder you want to save to: \n')
-    base_name=input('Enter the base name for the files: \n')
-
-    def __init__(self, host, port, timeout, save_every, run_until, file_folder, base_name):
-        ScopeDriver.__init__(host, port, timeout)
-        self.save_every = save_every
-        self.run_until = run_until
-        self.last_save = 0
-        self.file_folder = file_folder
-        #Removed  self.scope = ScopeDriver(...)
-    
-    def experiment_loop(self):
-        experiment_counter=0
-        experiment_counter <= self.run_until
-        while True:
-            time.sleep(5)
-            is_saved=self._auto_save()
-            if is_saved:
-                experiment_counter += 1
-            if experiment_counter > self.run_until:
-                break
-
-    def _auto_save(self):
-        current_averages = self.get_averages() #Removed .scope
-        if (current_averages - self.last_save) > self.save_every:
-            self._archive_data() #might need to change back to (self, averages)
-        self.last_save = current_averages
-
-    def _archive_data(self, averages):
-        save_file = os.path.join(self.file_folder, 
-                                 '{base_name}_{averages}_{time}'.format(base_name=self.base_name,
-                                 averages=averages, 
-                                 time=time.strftime('%H_%M_%S')))
-        data = self.get_data() #Changed from (channel=math2) #Removed self.scope.get_data
-        #formatted_data = FORMAT_YOUR_DATA
-        with open(save_file, 'r') as f:
-            f.write(data) #Changed from (formatted_data)
-            
 class ScopeDriver:
-    _host = ("GPIB8::1::INSTR")
-    _timeout = 5
-    _port = 5000
+    _host = 'TCPIP::169.254.27.62::INSTR'
+    _source = 'Math2'
+    _timeout = 5000
 
-    def __init__(self, host="GPIB8::1::INSTR", port=5000, timeout=5): #changed from "None"
-        if host:
-            self._host = host
-        if timeout:
-            self._timeout = timeout
-        if port:
-            self._port = port
-
-        self._socket = self._connect()
-    
+    def __init__(self, host = None, source = None, timeout = None): 
+        if host == None:
+            self.host = ScopeDriver._host
+        if source == None:
+            self.source = ScopeDriver._source
+        if timeout == None:
+            self.timeout = ScopeDriver._timeout
+            
     def _connect(self):
-   
         rm = visa.ResourceManager()
-        try:
-            self._conn = rm.open_resource(self._host)
-        except:
-            raise ConnectionError('Error message here')
+        connect = rm.open_resource(self.host)
+        return connect
     
     def _query(self, command):
-        return self._conn.query(command)
+        scope_query = self._connect()
+        scope_query.timeout = self.timeout
+        query = scope_query.query(command)
+        return query
+    
+    def _write(self, command):
+        scope_write = self._connect()
+        scope_write.timeout = self.timeout
+        write_command = scope_write.write(command)
+        return write_command     
+    
+    def _IDN(self):
+        identity = self._query('*IDN?')
+        return identity
+    
+    def start_run(self):
+#        self.clear_scope()
+        self._write('ACQuire:STATE RUN')
+        return "Averaging"
+        
+        
+    def stop_run(self):
+#        self._write('ACQuire:STOPAfter RUNSTOP')
+        self._write('ACQuire:STATE STOP')
+        return "Averaging stopped"
     
     def get_averages(self):
-        return self._query('ACQuire:NUMAVg?')
-
-    def set_data_source(self, source='math2'):
-
-        accepted = ['ch1', 'ch2', 'ch3', 'ch4', 'math1', 'math2', 'math3', 'math4']
-
-        if source.lower() in accepted:
-            self.write('data:source %s' % source)
-        else:
-            raise ValueError('Source %s unknown, expected %s' % (source, ' or '.join(accepted)))
+        avgs = self._query('ACQuire:NUMFRAMESACQuired?')
+        return avgs
     
-    def set_data_range(self, start, stop): #(self, start=1, stop=1000)
-        self.write('data:start %i' % start)
-        self.write('data:stop %i' % stop)
+    def data_source(self):                                #does source need to be included in args?
+        self._write('DATa:SOUrce Math2' )      #%self.source
+
+    def data_format(self):
+        format1 = self._query('DATa:ENCdg ASCIi?')
+        return format1
+
+    def frame_range(self, frame):
+        self._write('DATa:FRAMESTARt %s' %frame)
+        self._write('DATa:FRAMESTOP %s' %frame)
+#        return frame_start, frame_stop
+    
+    def data_range(self, start = None, stop = None):
+        data_start = self._write('DATa:STARt %i' %start)
+        data_stop = self._write('DATa:STOP %i' %stop)
+        return data_start, data_stop
+
+    def preamble(self):
+        header = self._query('wfmoutpre?').split(',')
+        return header        
+
+    def get_waveform(self):
+        self.data_source()
+#        set_format = self.data_format()
+        self.data_range(1, 1000000)
+        self.frame_range(9)               #Frame 9 is the summary frame of FastFrame acquisition
+        self.preamble()
+        time_list = []
+#        intensity_list = []
+#        current_intensity = []        
+        intensity = self._query('CURVe?').strip().split(',')
+#        intensity = list(map(float,intensity))
+        for i in range(0,len(intensity)):
+            current_time = "{:.11f}".format(3E-6 + 4E-11*i)
+            time_list.append(current_time)
+        waveform = np.column_stack((time_list,intensity))
+#        for x in range(0,len(intensity)):
+#            waveform[:,1] = "{:.12f}".format(waveform[:,1])
+#            intensity_list.append(current_intensity)
+        return waveform
+    
+    def clear_scope(self):
+        self._write('CLEAR ALL')
+        return "Instrument cleared"
+    
+    
+class Archive_Spectra(ScopeDriver):
+    _save_freq = 100000
+    _save_num = 20
+    _file_folder = 'C:\\Users\\Pate Lab\\OneDrive\\Oscilloscope Data-Controller'
+    _base_name = 'Naphthoquinone_15psi_2us_130C_archive'
+
+    def __init__(self, host = None, source = None, timeout = None, save_freq = None, save_num = None, file_folder = None, base_name = None):
+        super().__init__(host, source, timeout)
+        if save_freq == None:
+            self.save_freq = int(Archive_Spectra._save_freq)
+        if save_num == None:
+            self.save_num = int(Archive_Spectra._save_num)
+        if file_folder == None:
+            self.file_folder = Archive_Spectra._file_folder
+        if base_name == None:
+            self.base_name = Archive_Spectra._base_name
+    
+    def save_FID_FT(self):
+#        waveform, preamble = self.get_waveform()
+        thousand_avg = int(self.save_freq/1000)
+        os.chdir(self.file_folder)
+        file_name = '{base_name}_{averages}{avg}_{time}'.format(base_name = self.base_name, averages = thousand_avg, avg = 'Kavg', time = time.strftime('%H_%M_%S'))
+        file_name_txt = '{file_name}_{extension}'.format(file_name = file_name, extension = '.txt')
+        file_name_ft = '{file_name}_{extension}'.format(file_name = file_name, extension = '.ft')
+#        np.savetxt(full_file_name)
+        np.savetxt(file_name_txt, self.get_waveform(), fmt = '%s')
         
-    def get_data(self, channel, frame=None):
-        header = self._query('WFMOutpre?').split(',')
+        srate = 25E9
+        f = open(file_name_txt,'r')
+        timedomain = []
+        for row in f:
+            temp=row.split()
+            timedomain.append(float(temp[np.size(temp)-1]))
 
-        for row in header:
-            if 'points' in row:
-                data_len = int(row.replace('points', ''))
+        ndata = np.size(timedomain)
 
-        if frame is not None:
+        window = np.kaiser(ndata,9.5)	
+        
+        for i, row in enumerate(timedomain):
+            timedomain[i] = row * window[i]
+        
+        temp = np.zeros(ndata*2)
+        temp[0:ndata] = timedomain
+        timepad = temp
+        
+        fft = abs(scipy.fftpack.fft(timepad))/100
+        freq = (scipy.fftpack.fftfreq(np.size(timepad),1/srate))/1E6
+        freqs = []
+        ft = []
+        for i, row in enumerate(freq):
+            if row > 2000 and row < 8000:
+                freqs.append(row)
+                ft.append(fft[i]) 
+        
+        out = np.zeros((np.size(freqs),2))
+        for i,row in enumerate(freqs):
+            out[i,0]=row
+            out[i,1]=ft[i]#*gain[i,1]
+            
+        np.savetxt(file_name_ft, out)        
+        
+        
+    def archive_loop(self):        
+        counter = 0
+        self.start_run()
+        
+        while counter < int(self.save_num):
+#            self.start_run()
+            time.sleep(1)
+            current_avg = self.get_averages()
+            if int(current_avg) < int(self.save_freq):
+                time.sleep(1)
 
-            self.write('data:framestart %s'%frame)
-            self.write('data:framestop %s'%frame)
+            else:
+                counter += 1
+                self.stop_run()
+                self.save_FID_FT()
+                self.clear_scope()
+                self.start_run()
 
-        self.set_data_range(0, data_len)
+        self.stop_run()
+        print("Archiving is complete")
+            
 
-        output = self._query('curve?').strip().split(',')
+instance = Archive_Spectra()
+file = instance.archive_loop()
 
-        data = np.array(output, dtype='f8')
-        return data
