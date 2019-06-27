@@ -86,8 +86,7 @@ class ScopeDriver:
         self._write('DATa:SOUrce Math2' )                                       #%self.source
 
     def data_format(self):
-        format1 = self._query('DATa:ENCdg ASCIi?')
-        return format1
+        self._write('DATa:ENCdg ASCIi')
     
     # Allows you to select the data from a single frame or range of frames from
     # a FastFrame acquisition. We collect 9 total frames per gas shot. Eight 
@@ -112,7 +111,7 @@ class ScopeDriver:
     # Retrieves the time domain waveform from the scope.
     def get_waveform(self):
         self.data_source()
-#        set_format = self.data_format()
+        self.data_format()
         self.data_range(1, 1000000)
         self.frame_range(9)
         self.preamble()
