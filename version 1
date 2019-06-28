@@ -71,6 +71,10 @@ class ScopeDriver:
         identity = self._query('*IDN?')
         return identity
     
+    def scope_state(self):
+        state = self._query('ACQuire:STATE?')
+        return state
+    
     def start_run(self):
 #        self.clear_scope()
         self._write('ACQuire:STATE RUN')
@@ -173,7 +177,8 @@ class Archive_Spectra(ScopeDriver):
     # Time domain and frequency domain data saved
     def save_FID_FT(self):
         thousand_avg = int(self.save_freq/1000)
-        os.chdir(self.file_folder)
+#        os.chdir(self.file_folder)
+        
         file_name = '{base_name}_{averages}{avg}_{time}'.format(base_name = self.base_name, averages = thousand_avg, avg = 'Kavg', time = time.strftime('%H_%M_%S'))
         file_name_txt = '{file_name}_{extension}'.format(file_name = file_name, extension = '.txt')
         file_name_ft = '{file_name}_{extension}'.format(file_name = file_name, extension = '.ft')
@@ -220,15 +225,20 @@ class Archive_Spectra(ScopeDriver):
     # Saves a set number of spectra.        
     def archive_loop(self):        
         counter = 0
-        self.start_run()
-        
+        self.set_math_averages(self.save_freq/10)
+        scope_state = self.scope_state()
+        if scope_state == 'ON':
+            self.stop_run()
+            self.clear_scope()
+            self.start_run()
+        else:
+            self.start_run()
         while counter < int(self.save_num):
 #            self.start_run()
             time.sleep(1)
             current_avg = self.get_averages()
             if int(current_avg) < int(self.save_freq):
                 time.sleep(1)
-
             else:
                 counter += 1
                 self.stop_run()
