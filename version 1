@@ -1,8 +1,8 @@
- # -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """
 Author: Channing West
 
-Changelog: 5/10/2019
+Changelog: 6/28/2019
 
 This program archives rotational spectra from the Tektronix DPO73304D oscilloscope
 at set intervals.
@@ -15,6 +15,12 @@ import os
 import time
 import scipy
 import scipy.fftpack
+from tkinter import *
+from tkinter import messagebox
+from tkinter.filedialog import askopenfilename
+from tkinter.filedialog import askdirectory
+
+
 
 class ScopeDriver:
     
@@ -70,7 +76,6 @@ class ScopeDriver:
         self._write('ACQuire:STATE RUN')
         return "Averaging"
         
-        
     def stop_run(self):
 #        self._write('ACQuire:STOPAfter RUNSTOP')
         self._write('ACQuire:STATE STOP')
@@ -82,8 +87,8 @@ class ScopeDriver:
         return avgs
     
     # Selects the scope channel that the data will come from.
-    def data_source(self):                                                      #does source need to be included in args?
-        self._write('DATa:SOUrce Math2' )                                       #%self.source
+    def data_source(self):                                                      
+        self._write('DATa:SOUrce Math2')
 
     def data_format(self):
         self._write('DATa:ENCdg ASCIi')
@@ -102,6 +107,9 @@ class ScopeDriver:
     def data_range(self, start = None, stop = None):
         self._write('DATa:STARt %i' %start)
         self._write('DATa:STOP %i' %stop)
+        
+    def set_math_averages(self, number):
+        self._write('Math2:NUMAVg %i' %number)
     
     # Retrieves the preamble of the data being transferred.
     def preamble(self):
@@ -135,18 +143,30 @@ class Archive_Spectra(ScopeDriver):
 # is saved as well as a Fourier transformed data set
     
     _save_freq = 100000
-    _save_num = 20
+    _save_num = 10
+    _start_frequency = 2000
+    _stop_frequency = 8000
+    _sampling_rate = 25E9
     _file_folder = 'C:\\Users\\Pate Lab\\OneDrive\\Oscilloscope Data-Controller'
-    _base_name = 'Naphthoquinone_15psi_2us_130C_archive'
+    _base_name = 'Archive'
 
-    def __init__(self, host = None, source = None, timeout = None, save_freq = None, save_num = None, file_folder = None, base_name = None):
+    def __init__(self, host = None, source = None, timeout = None,\
+                 save_freq = None, save_num = None, start_frequency = None,\
+                 stop_frequency = None, sampling_rate = None, base_name = None): #file_folder = None,
+        
         super().__init__(host, source, timeout)
         if save_freq == None:
             self.save_freq = int(Archive_Spectra._save_freq)
         if save_num == None:
             self.save_num = int(Archive_Spectra._save_num)
-        if file_folder == None:
-            self.file_folder = Archive_Spectra._file_folder
+        if start_frequency == None:
+            self.start_frequency = int(Archive_Spectra._start_frequency)
+        if stop_frequency == None:
+            self.stop_frequency = int(Archive_Spectra._stop_frequency)
+        if sampling_rate == None:
+            self.sampling_rate = int(Archive_Spectra._sampling_rate)
+#        if file_folder == None:
+#            self.file_folder = Archive_Spectra._file_folder
         if base_name == None:
             self.base_name = Archive_Spectra._base_name       
             
@@ -161,7 +181,7 @@ class Archive_Spectra(ScopeDriver):
         
         # This code has been taken from fft-zero-padding-with heading.py and 
         # it performs a FT of the time domain data
-        sampling_rate = 25E9
+#        sampling_rate = 25E9
         raw_data = open(file_name_txt,'r')
         
         timedomain = []
@@ -182,11 +202,11 @@ class Archive_Spectra(ScopeDriver):
         timepad = temp
         
         fft = abs(scipy.fftpack.fft(timepad))/100
-        freq = (scipy.fftpack.fftfreq(np.size(timepad),1/sampling_rate))/1E6
+        freq = (scipy.fftpack.fftfreq(np.size(timepad),1/(self.sampling_rate*10E9)))/1E6
         freqs = []
         ft = []
         for i, row in enumerate(freq):
-            if row > 2000 and row < 8000:
+            if row > self.start_frequency and row < self.stop_frequency:
                 freqs.append(row)
                 ft.append(fft[i]) 
         
@@ -218,8 +238,96 @@ class Archive_Spectra(ScopeDriver):
 
         self.stop_run()
         print("Archiving is complete")
-            
+        
+        
+class Archive_GUI(Frame):
+    
+    def __init__(self, master=None):
+        Frame.__init__(self, master)
+        self.master = master
+        self.init_window()
+    
+    def init_window(self):
+        self.master.title('Mixture Analysis')
 
-instance = Archive_Spectra()
+#--------------------------------Variables-------------------------------------        
+        self.save_freq = IntVar()
+        self.save_num = IntVar()
+        self.start_frequency = IntVar()
+        self.stop_frequency = IntVar()
+        self.sampling_rate = IntVar()
+        self.base_name = StringVar()
+
+#-----------------------------------Labels-------------------------------------        
+        labels = [('save_freq_label','Number of averages before save:'),\
+                  ('save_num_label','Number of files to archive:'),\
+                  ('start_frequency_label','Starting frequency (MHz):'),\
+                  ('stop_frequency_label','Stopping frequency (MHz):'),\
+                  ('sampling_rate_label','Digitization rate (GSa/s):'),\
+                  ('base_name_label','Base file name:')]
+        
+        counter = 0
+        
+        for var, label in labels:
+            var = Label(self.master, text=label, justify=RIGHT).grid(row=counter, column=0, sticky=E)
+            counter += 1
+            
+#----------------------------------Entries-------------------------------------        
+        entries = [('save_freq_entry' , self.save_freq),\
+                   ('save_num_entry' , self.save_num),\
+                   ('start_frequency_entry' , self.start_frequency),\
+                   ('stop_frequency_entry' , self.stop_frequency),\
+                   ('sampling_rate_entry', self.sampling_rate),\
+                   ('base_name_entry' , self.base_name)]
+
+        counter = 0
+
+        for entry, var in entries:
+            entry = Entry(self.master, textvariable=var, justify=CENTER).grid(row=counter, column=1)
+            counter += 1
+
+#----------------------------------Buttons-------------------------------------
+        set_directory = Button(self.master, text="Choose directory for saving files", command=self.choose_directory)\
+        .grid(row=15, column=1)
+        
+        destroy_button = Button(self.master,text="Enter",command=self.client_exit)\
+        .grid(row=16,column=1)
+        
+        
+    def choose_directory(self):
+        directory = askdirectory()
+        os.chdir(directory)
+            
+    def client_exit(self):
+        self.master.destroy()
+
+
+root = Tk()
+my_gui = Archive_GUI(root)
+root.mainloop()
+
+
+def get_archive_params():
+    save_freq = my_gui.save_freq.get()
+    save_num = my_gui.save_num.get()
+    start_frequency = my_gui.start_frequency.get()
+    stop_frequency = my_gui.stop_frequency.get()
+    sampling_rate = my_gui.sampling_rate.get()
+    base_name = my_gui.base_name.get()
+    return save_freq, save_num, start_frequency, stop_frequency, sampling_rate, base_name
+
+save_freq, save_num, start_frequency, stop_frequency, sampling_rate, base_name = get_archive_params()
+    
+
+instance = Archive_Spectra(save_freq = save_freq,\
+                           save_num = save_num,\
+                           start_frequency = start_frequency,\
+                           stop_frequency = stop_frequency,\
+                           sampling_rate = sampling_rate,\
+                           base_name = base_name)
+
 file = instance.archive_loop()
+
+
+
 
