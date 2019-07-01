@@ -1,0 +1,61 @@
+# -*- coding: utf-8 -*-
+"""
+Author: Channing West
+
+Changelog: 7/1/2019
+
+This program queries and writes temperature values to the Omega CN710 temperature
+controllers.
+"""
+
+import minimalmodbus
+
+class Heater_Driver():
+    
+    def __init__(self, port='COM3', mode=minimalmodbus.MODE_ASCII, baudrate=9600, parity='E', bytesize=7, stopbits=1):
+        self.port = port
+        self.mode = mode
+        self.baudrate = baudrate
+        self.parity = parity
+        self.bytesize = bytesize
+        self.stopbits = stopbits
+        
+    def heater(self, slaveaddress):
+        heater = minimalmodbus.Instrument(self.port, slaveaddress, self.mode)
+        heater.serial.baudrate = self.baudrate
+        heater.serial.parity = self.parity
+        heater.serial.bytesize = self.bytesize
+        heater.serial.stopbits = self.stopbits
+        return heater
+            
+class Temperature_Controller(Heater_Driver):
+    
+    def __init__(self, port='COM3', mode=minimalmodbus.MODE_ASCII, baudrate=9600, parity='E', bytesize=7, stopbits=1):
+        super().__init__(port='COM3', mode=minimalmodbus.MODE_ASCII, baudrate=9600, parity='E', bytesize=7, stopbits=1)
+        
+    def read_temp_single(self, slaveaddress):
+        heater = self.heater(slaveaddress)
+        PV = heater.read_register(0x4700, 1)
+        return PV
+
+    def set_temp_single(self, slaveaddress, temp):
+        heater = self.heater(slaveaddress)
+        SV = heater.write_register(0x4701, temp, 1,functioncode=6)
+
+    def read_temp_all(self):
+        heater1 = self.heater(1)
+        heater2 = self.heater(3)
+        heater3 = self.heater(4)
+        PV = []
+        PV.append(heater1.read_register(0x4700, 1))
+        PV.append(heater2.read_register(0x4700, 1))
+        PV.append(heater3.read_register(0x4700, 1))
+        return PV
+    
+    def set_temp_all(self, temp):
+        heater1 = self.heater(1)
+        heater2 = self.heater(3)
+        heater3 = self.heater(4)
+        heater1.write_register(0x4701, temp, 1, functioncode=6)
+        heater2.write_register(0x4701, temp, 1, functioncode=6)
+        heater3.write_register(0x4701, temp, 1, functioncode=6)
