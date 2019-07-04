@@ -36,10 +36,18 @@ class ScopeDriver:
     def __init__(self, host = None, source = None, timeout = None): 
         if host == None:
             self.host = ScopeDriver._host
+#        else:
+#            self.host = host
+            
         if source == None:
             self.source = ScopeDriver._source
+#        else:
+#            self.source = source
+            
         if timeout == None:
             self.timeout = ScopeDriver._timeout
+#        else:
+#            self.timeout = timeout
     
     # Use PyVisa to setup Resource Manager and establish connection between the
     # PC controller and the scope        
@@ -146,8 +154,8 @@ class Archive_Spectra(ScopeDriver):
 # when a user defined number of FIDs have been recoreded. The time domain file
 # is saved as well as a Fourier transformed data set
     
-    _save_freq = 100000
-    _save_num = 10
+    _save_freq = 10000
+    _save_num = 2
     _start_frequency = 2000
     _stop_frequency = 8000
     _sampling_rate = 25E9
@@ -156,23 +164,44 @@ class Archive_Spectra(ScopeDriver):
 
     def __init__(self, host = None, source = None, timeout = None,\
                  save_freq = None, save_num = None, start_frequency = None,\
-                 stop_frequency = None, sampling_rate = None, base_name = None): #file_folder = None,
+                 stop_frequency = None, sampling_rate = None, file_folder = None, base_name = None): #file_folder = None,
         
-        super().__init__(host, source, timeout)
+        super().__init__()
+        
         if save_freq == None:
             self.save_freq = int(Archive_Spectra._save_freq)
+        else: 
+            self.save_freq = save_freq
+        
         if save_num == None:
             self.save_num = int(Archive_Spectra._save_num)
+        else:
+            self.save_num = save_num
+        
         if start_frequency == None:
             self.start_frequency = int(Archive_Spectra._start_frequency)
+        else:
+            self.start_frequency = start_frequency
+        
         if stop_frequency == None:
             self.stop_frequency = int(Archive_Spectra._stop_frequency)
+        else:
+            self.stop_frequency = stop_frequency
+        
         if sampling_rate == None:
             self.sampling_rate = int(Archive_Spectra._sampling_rate)
-#        if file_folder == None:
-#            self.file_folder = Archive_Spectra._file_folder
+        else:
+            self.sampling_rate = sampling_rate
+        
+        if file_folder == None:
+            self.file_folder = Archive_Spectra._file_folder
+        else:
+            self.file_folder = file_folder
+        
         if base_name == None:
-            self.base_name = Archive_Spectra._base_name       
+            self.base_name = Archive_Spectra._base_name
+        else:
+            self.base_name = base_name
             
     # Time domain and frequency domain data saved
     def save_FID_FT(self):
@@ -225,7 +254,7 @@ class Archive_Spectra(ScopeDriver):
     # Saves a set number of spectra.        
     def archive_loop(self):        
         counter = 0
-        self.set_math_averages(self.save_freq/10)
+        self.set_math_averages(int(self.save_freq)/10)
         scope_state = self.scope_state()
         if scope_state == 'ON':
             self.stop_run()
@@ -250,10 +279,14 @@ class Archive_Spectra(ScopeDriver):
         print("Archiving is complete")
         
         
-class Archive_GUI(Frame):
+class Archive_GUI(Frame, Archive_Spectra):
     
-    def __init__(self, master=None):
+    def __init__(self, master=None, host = None, source = None, timeout = None,\
+                 save_freq = None, save_num = None, start_frequency = None,\
+                 stop_frequency = None, sampling_rate = None, base_name = None):
+        
         Frame.__init__(self, master)
+        super().__init__() #self, master, host, source, timeout, save_freq, save_num, start_frequency, stop_frequency, sampling_rate, base_name 
         self.master = master
         self.init_window()
     
@@ -300,7 +333,9 @@ class Archive_GUI(Frame):
         set_directory = Button(self.master, text="Choose directory for saving files", command=self.choose_directory)\
         .grid(row=15, column=1)
         
-        destroy_button = Button(self.master,text="Enter",command=self.client_exit)\
+#        run_button = Button(self.master, text="Run", command=self.run_archive)
+        
+        destroy_button = Button(self.master,text="Exit",command=self.client_exit)\
         .grid(row=16,column=1)
         
         
@@ -327,17 +362,7 @@ def get_archive_params():
     return save_freq, save_num, start_frequency, stop_frequency, sampling_rate, base_name
 
 save_freq, save_num, start_frequency, stop_frequency, sampling_rate, base_name = get_archive_params()
-    
-
-instance = Archive_Spectra(save_freq = save_freq,\
-                           save_num = save_num,\
-                           start_frequency = start_frequency,\
-                           stop_frequency = stop_frequency,\
-                           sampling_rate = sampling_rate,\
-                           base_name = base_name)
-
-file = instance.archive_loop()
-
-
-
-
+#print(save_freq, save_num, start_frequency, stop_frequency, sampling_rate, base_name)    
+#
+instance = Archive_Spectra(save_freq = save_freq, save_num = save_num, start_frequency = start_frequency, stop_frequency = stop_frequency, sampling_rate = sampling_rate, base_name = base_name)
+file = instance.archive_loop()        
