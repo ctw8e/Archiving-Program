@@ -1,0 +1,357 @@
+# -*- coding: utf-8 -*-
+"""
+Author: Channing West
+
+Changelog: July 5, 2019
+
+Performs Fourier transform on FID waveform. Compared to previous FFT scripts, 
+this version allows the user to input
+1. Frequency range of the FT 
+2. Sampling rate
+3. The length of the time domain to be used
+4. KB window value 
+5. Amount of zero-padding
+6. Returns full FT and magnitude FT
+"""
+
+import os
+import scipy
+import numpy as np
+import scipy.fftpack
+from tkinter import *
+from tkinter import messagebox
+from tkinter.filedialog import askopenfilename
+from tkinter.filedialog import askdirectory
+import matplotlib
+from matplotlib import pyplot as plt
+matplotlib.use("TkAgg")
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
+from matplotlib.figure import Figure
+
+
+class FFT:
+    
+    def __init__(self, freq_start, freq_stop, sample_rate):
+        self.freq_start = freq_start
+        self.freq_stop = freq_stop
+        self.sample_rate = int(sample_rate) * 1E9
+
+    def open_time_domain(self):
+        file = askopenfilename(filetypes = (("Choose Time Domain File", "*.txt"),))
+        file_open = open(file, 'r')
+        time = []
+        time_microseconds = []
+        intensity = []
+        for row in file_open:
+            time_intensity = row.split()
+            time.append(float(time_intensity[-2]))
+            intensity.append(float(time_intensity[-1]))
+        for x in time:
+            time_microseconds.append(x * 1E6)
+        return time, time_microseconds, intensity
+    
+    def plot_time_domain(self, time, intensity):
+        plt.plot(time, intensity)
+        plt.show()
+   
+    def time_domain_fraction(self, fraction):
+        time, time_microseconds, intensity = self.open_time_domain()
+        len_file = round(len(time)*fraction)
+        partial_time = time[0:len_file]
+        partial_intensity = intensity[0:len_file]
+        return partial_time, partial_intensity
+    
+    def plot_fraction(self, time, intensity, partial_time, partial_intensity):
+        plt.plot(time, intensity, partial_time, partial_intensity, 'red', linewidth='0.2')
+        plt.show()
+        
+    def kaiser_window(self, beta, fraction):
+        partial_time, partial_intensity = self.time_domain_fraction(fraction)
+        len_file = len(partial_time)
+        KB = np.kaiser(len_file, beta)
+        window_function = []
+        for i, row in enumerate(partial_intensity):
+            window_function.append(partial_intensity[i]*KB[i])
+        return partial_time, window_function
+    
+    def plot_KB(self, partial_time, window_function):
+        plt.plot(partial_time, window_function)
+        plt.show()
+        
+    def zero_padding(self, padding, beta, fraction):
+        partial_time, window_function = self.kaiser_window(beta, fraction)
+        final_time = partial_time[-1]
+        record_length = int(padding) * 1E-6
+        point_spacing = 4E-11
+        number_points = record_length/point_spacing
+        difference = number_points - len(partial_time)
+        
+        for x in range(1, int(difference+1)):
+            current_time = final_time + point_spacing * x
+            partial_time.append(current_time)
+
+        zeropad_time = np.zeros((int(number_points),))
+        zeropad_time[0:len(partial_time)] = partial_time
+
+        zeropad_intensity = np.zeros((int(number_points),))
+        zeropad_intensity[0:len(window_function)] = window_function
+
+        return zeropad_time, zeropad_intensity
+    
+    def plot_zero_padding(self, zeropad_time, zeropad_intensity):
+        plt.plot(zeropad_time, zeropad_intensity)
+        plt.show()
+    
+    def magnitude_FT(self, padding, beta, fraction):
+        zeropad_time, zeropad_intensity = self.zero_padding(padding, beta, fraction)
+        fft = abs(scipy.fftpack.fft(zeropad_intensity))/100
+        freq = (scipy.fftpack.fftfreq(np.size(zeropad_intensity),1/self.sample_rate))/1E6
+        freqs=[]
+        ft=[]
+        
+        for i, row in enumerate(freq):
+            if row>self.freq_start and row<self.freq_stop:
+                freqs.append(row)
+                ft.append(fft[i]) 
+        
+        out=np.zeros((np.size(freqs),2))
+        
+        for i,row in enumerate(freqs):
+            out[i,0]=row
+            out[i,1]=ft[i]
+        
+        plt.plot(freqs,ft, 'blue',linewidth=0.2)
+        plt.show()
+        np.savetxt('TestFT',out)
+     
+        
+        
+class FFT_GUI(Frame):
+
+    def __init__(self, master=None):
+        Frame.__init__(self, master)
+        self.master = master
+        self.init_window()
+        
+    def init_window(self):
+        self.master.title('FFT')
+        
+        self.freq_start = IntVar()
+        self.freq_stop = IntVar()
+        self.sample_rate = IntVar()
+        self.frac = DoubleVar()
+        self.KB = DoubleVar()
+        self.ZP = IntVar()
+        
+        
+        labels_entries_1 = [('freq_start','Start Frequency (MHz):'), \
+                          ('freq_start_entry', self.freq_start), \
+                          ('freq_stop','Stop Frequency (MHz):'), \
+                          ('freq_stop_entry', self.freq_stop), \
+                          ('sample_rate','Sample Rate (GSa/s):'), \
+                          ('sample_rate_entry',self.sample_rate)]
+        
+        counter_1 = 0
+        column_counter_1 = 0
+        
+        for var, label in labels_entries_1:
+            
+            if counter_1 % 2 == 0:
+                var = Label(self.master, text=label, justify=RIGHT).grid(row=0, column=column_counter_1, padx=5, pady=10)
+                counter_1 += 1
+                column_counter_1 += 1
+            else:
+                var = Entry(self.master, textvariable=label, justify=CENTER).grid(row=0, column=column_counter_1, padx=5, pady=10)
+                counter_1 += 1
+                column_counter_1 += 1
+
+
+        labels_entries_2 = [('frac_label','Fraction of FID:'), \
+                          ('frac_entry',self.frac), \
+                          ('KB_label','Kaiser Bessel Parameter:'), \
+                          ('KB_entry',self.KB), \
+                          ('ZP_label','Zero-Padded Record Length (us):'), \
+                          ('ZP_entry',self.ZP)]
+        
+        counter_2 = 0
+        column_counter_2 = 0
+        
+        for var, label in labels_entries_2:
+            
+            if counter_2 % 2 == 0:
+                var = Label(self.master, text=label, justify=RIGHT).grid(row=1, column=column_counter_2,padx=5, pady=10)
+                counter_2 += 1
+                column_counter_2 += 1
+            else:
+                var = Entry(self.master, textvariable=label, justify=CENTER).grid(row=1, column=column_counter_2, padx=5, pady=10)
+                counter_2 += 1
+                column_counter_2 += 1
+        
+        KB_window_ZP = Button(self.master, text="Upload Time Domain and Execute FFT", command=self.FFT_for_GUI).grid(row=2, column=0, columnspan=10, sticky=W+E, pady=10)
+        
+        time_domain_title = Label(self.master, text='Time Domain: ', justify=CENTER).grid(row=3, column=0, columnspan=10)
+        
+        time_figure = Figure(figsize=(10,3), dpi=100)
+        time_subplot = time_figure.add_subplot(111).plot([],[])
+        
+        canvas = FigureCanvasTkAgg(time_figure, master=root)
+        canvas.draw()
+        canvas.get_tk_widget().grid(row=4, column=0, columnspan=10, rowspan=3)
+        
+#        upload_time_domain = Button(self.master, text="Upload Time Domain File", command=self.open_time_domain).grid(row=4, column=0, columnspan=10, sticky=W+E, pady=10)
+        window_title = Label(self.master, text='Window Function', justify=CENTER).grid(row=7, column=0, columnspan=10)
+
+        window_figure = Figure(figsize=(10,3), dpi=100)
+        window_subplot = window_figure.add_subplot(111).plot([],[])
+        
+        canvas_2 = FigureCanvasTkAgg(window_figure, master=root)
+        canvas_2.draw()
+        canvas_2.get_tk_widget().grid(row=8, column=0, columnspan=10, rowspan=3)
+        
+        FFT_title = Label(self.master, text='FFT: Intensity (mV) vs. Frequency (MHz)', justify=CENTER).grid(row=11, column=0, columnspan=10)
+        
+        FFT_figure = Figure(figsize=(10,3), dpi=100)
+        FFT_subplot = FFT_figure.add_subplot(111).plot([],[])
+        
+        canvas_3 = FigureCanvasTkAgg(FFT_figure, master=root)
+        canvas_3.draw()
+        canvas_3.get_tk_widget().grid(row=12, column=0, columnspan=10, rowspan=3)
+        
+        destroy = Button(self.master, text="Exit", command=self.client_exit).grid(row=15, column=0, columnspan=10, sticky=W+E, pady=10)
+        
+            
+    def FFT_for_GUI(self):
+        
+        freq_start = self.freq_start.get()
+        freq_stop = self.freq_stop.get()
+        sample_rate = self.sample_rate.get()*1E9
+        frac = self.frac.get()
+        KB = self.KB.get()
+        ZP = self.ZP.get()
+
+
+#________________________________open_time_domain______________________________
+        filename = askopenfilename(filetypes = (("Choose Time Domain File", "*.txt"),))
+        open_file = open(filename, 'r')
+        base = os.path.basename(filename)
+        filename = os.path.splitext(base)[0]
+        
+        time = []
+        time_microseconds = []
+        intensity = []
+        
+        for row in open_file:
+            time_intensity = row.split()
+            time.append(float(time_intensity[-2]))
+            intensity.append(float(time_intensity[-1]))
+        
+        for x in time:
+            time_microseconds.append(x * 1E6)
+        
+        time_figure = Figure(figsize=(10,3), dpi=100)
+        time_subplot = time_figure.add_subplot(111).plot(time_microseconds,intensity, linewidth='0.3')
+        
+        canvas = FigureCanvasTkAgg(time_figure, master=root)
+        canvas.draw()
+        canvas.get_tk_widget().grid(row=4, column=0, columnspan=10, rowspan=3)
+
+
+
+#________________________________time_domain_fraction__________________________
+        len_file_1 = round(len(time)*frac)
+        partial_time = time[0:len_file_1]
+        partial_time_microseconds = time_microseconds[0:len_file_1]
+        partial_intensity = intensity[0:len_file_1]
+
+
+#_______________________________kaiser_window__________________________________
+        len_file_2 = len(partial_time)
+        kaiser = np.kaiser(len_file_2, KB)
+        window_function = []
+        
+        for i, row in enumerate(partial_intensity):
+            window_function.append(partial_intensity[i]*kaiser[i])
+
+
+#_________________________________zero_padding_________________________________
+        final_time = partial_time[-1]
+        record_length = ZP * 1E-6
+        point_spacing = 4E-11
+        number_points = record_length/point_spacing
+        difference = number_points - len(partial_time)
+        
+        for x in range(1, int(difference+1)):
+            current_time = final_time + point_spacing * x
+            partial_time.append(current_time)
+
+        zeropad_time = np.zeros((int(number_points),))
+        zeropad_time[0:len(partial_time)] = partial_time
+
+        zeropad_intensity = np.zeros((int(number_points),))
+        zeropad_intensity[0:len(window_function)] = window_function
+        
+        window_figure = Figure(figsize=(10,3), dpi=100)
+        window_subplot = window_figure.add_subplot(111).plot(zeropad_time, zeropad_intensity, linewidth='0.3')
+        
+        canvas_2 = FigureCanvasTkAgg(window_figure, master=root)
+        canvas_2.draw()
+        canvas_2.get_tk_widget().grid(row=8, column=0, columnspan=10, rowspan=3)
+        
+        fft = abs(scipy.fftpack.fft(zeropad_intensity))/100
+        freq = (scipy.fftpack.fftfreq(len(zeropad_intensity), d=(1/sample_rate)))/1E6
+
+        fft_complex = scipy.fftpack.fft(zeropad_intensity)/100
+        freq_complex = (scipy.fftpack.fftfreq(len(zeropad_intensity), d=(1/sample_rate)))/1E6
+                
+        freqs=[]
+        ft=[]
+        
+        freqs_complex = []
+        ft_complex = []
+        
+        for i, row in enumerate(freq):
+            if row > freq_start and row < freq_stop:
+                freqs.append(row)
+                ft.append(fft[i]) 
+
+        for i, row in enumerate(freq_complex):
+            if row > freq_start and row < freq_stop:
+                freqs_complex.append(row)
+                ft_complex.append(fft_complex[i]) 
+
+        FFT_figure = Figure(figsize=(10,3), dpi=100)
+        FFT_subplot = FFT_figure.add_subplot(111).plot(freqs,ft, linewidth='0.3')
+
+        canvas_3 = FigureCanvasTkAgg(FFT_figure, master=root)
+        canvas_3.draw()
+        canvas_3.get_tk_widget().grid(row=12, column=0, columnspan=10, rowspan=3)
+        
+        out = np.zeros((np.size(freqs),2))
+        out_complex = np.zeros((np.size(freqs),2))
+        
+        for i,row in enumerate(freqs):
+            out[i,0]=row
+            out[i,1]=ft[i]
+
+        for i,row in enumerate(freqs_complex):
+            out_complex[i,0]=row
+            out_complex[i,1]=ft_complex[i]
+
+        
+        np.savetxt(filename+'_FF'+str(round(frac*10))+'_KB'+str(round(KB*10))+'_TRL'+str(round(ZP))+'.ft', out)
+        np.savetxt(filename + '_FF' + str(round(frac*10)) + '_KB' + str(round(KB*10)) + '_TRL' + str(round(ZP)) + '_complex.ft', out_complex)
+
+        
+    def client_exit(self):
+        root.destroy()
+
+root = Tk()
+my_gui = FFT_GUI(root)
+root.mainloop()
+
+        
+#instance = FFT(2000, 8000, 25)
+#print(instance.magnitude_FT(80,9.5, 0.5))
+
+
+
